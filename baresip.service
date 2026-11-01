@@ -1,0 +1,16 @@
+[Unit]
+Description=baresip SIP client (controlled by wifi_ui.py via ctrl_tcp)
+After=network-online.target tailscaled.service sound.target
+Wants=network-online.target
+
+[Service]
+User=@USER@
+# Tailscale の IP が付くまで最大2分待つ(付かなくても起動し、失敗すれば再起動で再挑戦)
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 60); do tailscale ip -4 >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+ExecStart=/usr/bin/baresip -f @DIR@
+StandardInput=null
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

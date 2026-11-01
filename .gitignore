@@ -1,0 +1,22 @@
+# 現地ログ・解析データ (Cookie / MAC / SSID を含む)
+captive_logs/
+*.har
+run.json
+auth.json
+hops/
+# 端末ごとの状態
+touch_cal.json
+touch_report*.json
+call_log.json
+contacts.json
+# 生成物
+*.lf
+*.tmp
+__pycache__/
+*.pyc
+build/
+# OS / エディタ
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/

@@ -1,11 +1,11 @@
 # SIP電話端末 開発ログ（試行の経過と詰まった点）
 
 対象: Pi Zero W + ATmega328P(UNO) + 3.95" ILI9488 TFTシールド
-記録期間: 2026-09-24 〜 2026-11-02
+記録期間: 2026-09-24 〜 2026-11-03
 
 ---
 
-## 現在の状態（2026-11-02 時点）
+## 現在の状態（2026-11-03 時点）
 
 | 項目 | 状態 |
 |---|---|
@@ -14,6 +14,7 @@
 | キャプティブポータルの自動認証（ドン・キホーテ / Wi2 onetap） | PC と Pi の両方で成功。60秒ごとに確認し、必要なら再認証 |
 | SIPサーバー（Pi Zero W + Kamailio 6.0.1 + Tailscale） | 稼働中。TLSF でないと起動しない |
 | PC(MicroSIP 1001) ⇔ iPhone(AGEphone 1002) | 通話成功 |
+| 端末(1003) ⇔ PC(1001) | 双方向で呼び出し成功。1001 の Received は Tailscale の IP（nathelper 反映済み） |
 | 端末Pi（baresip 1003 + USBヘッドセット + TFT通話画面） | 発信・着信・ヘッドセットのボタン操作まで成功 |
 | 現地試験（ドン・キホーテで端末から通話） | 未実施 |
 
@@ -281,6 +282,25 @@
   - 背景: iOS は、バックグラウンドで SIP アプリが通信を続けることを許さない。iPhone の Tailscale も待機中は止まることがある。自前サーバー（Tailscale 内）では Push 着信が使えないため、**iPhone は「アプリを前面に出している間だけ登録・着信できる」**のが前提になる。
 - 未反映: `ul.dump` で 1001 の Address が `192.168.1.37`（PCの自宅LANのIP）のまま。nathelper 版の kamailio.cfg をサーバーに入れ直す（`install_kamailio.sh` の再実行）必要がある。入れ直すまでは、自宅外から PC にかけても声が届かない可能性がある。
 
+### Step 28: PC(1001) にだけ着信しない（11-03）
+- 症状: 端末Pi（1003）から PC へ発信しても PC が鳴らない。PC → 端末は通る。MicroSIP の下部に「リクエストタイムアウト」。
+- 詰まった点1: 確認コマンドを**逆のPi**で実行した。baresip の確認をサーバー（sipserver）で、kamailio / kamcmd / sngrep の確認を端末（sipphone）で行い、どちらも `not found`。
+  - 役割: **sipserver = SIPサーバー**（LAN 192.168.1.5 / Tailscale <SERVER_TS_IP>）、**sipphone = 通話端末**（LAN 192.168.1.4 / Tailscale <PHONE_TS_IP>）。
+- Tailscale は正常: サーバーから見て端末は `active; direct`、端末からサーバーへの ping は約0.3ms。
+- 原因: サーバーの Kamailio が 07:26 に起動し直しており、登録情報（メモリのみ）が消えていた。`kamcmd ul.dump` には 1003 だけ。端末の baresip は自分で再登録したが、MicroSIP は再登録しなかった → PC 宛ての INVITE は 404。PC からの発信は、未登録でも中継する設定なので通っていた。
+- MicroSIP の設定（`%APPDATA%\MicroSIP\MicroSIP.ini`）は正常: server / domain = <SERVER_TS_IP>、UDP、STUN・ICE オフ、registerRefresh=300。
+- 詰まった点2: サーバーに tcpdump が無かった → `sudo apt-get install -y tcpdump`。
+- 詰まった点3: `tcpdump -A ... | grep -E "^(REGISTER|INVITE|SIP/2.0)"` で何も出なかった → `-A` は IP ヘッダーも文字として同じ行の先頭に出すため、`^` で行頭指定すると一致しない。行頭指定を外す（`grep -oE "REGISTER sip:[^ ]*|SIP/2\.0 [0-9]{3} [A-Za-z ]*"`）。
+- PC → 1003 の INVITE は Tailscale 経由で届いていた（100 / 180 / CANCEL / 487 / ACK）。
+- MicroSIP をトレイから「終了」→ 起動を繰り返したところ、REGISTER → 200 OK となり登録された。その後 1003 → 1001 の呼び出しで PC が鳴った（180 Ringing）。
+- 登録内容: 1001 の Address は `sip:1001@192.168.1.13:50292;ob`（MicroSIP の申告）、Received は `sip:<PC_TS_IP>:50292`（実際の送信元）。Kamailio は Received に送るので、自宅外からでも届く → **Step 27 の「未反映」は解消**（`grep -c nathelper /etc/kamailio/kamailio.cfg` = 3）。
+- 未確定: MicroSIP が REGISTER を送らなくなった原因。Kamailio の再起動中に再登録が重なり、その後の再試行が止まった可能性がある（未確認）。
+- 再発時の対処: サーバーで `sudo kamcmd ul.dump | grep AoR` → 1001 が無ければ MicroSIP をトレイから「終了」→ 起動。それでも駄目なら MicroSIP の設定で「ログを有効にする」にして原因を見る。
+- 付随:
+  - 両方のPiとも、ユーザー pi の初期パスワードのまま（ログイン時に警告）→ `passwd` で変更する。
+  - TFT の status_screen（接続状態画面）は ONLINE になっても自動ではホームに戻らない（仕様）。ホームへは LIST → BACK。
+  - ブログ用に `blog_screens/tft_render.py` を作成: wifi_ui.py の描画命令（C/R/B/L/T）を、tft_coproc.ino と同じ規則（Adafruit GFX 5x7 フォント、RGB565）で PNG に描く。表示値はダミー。
+
 ---
 
 ## 確認チェックリスト（詰まったときに上から見る）
@@ -318,7 +338,10 @@
 ### SIPサーバー（Kamailio）
 - [ ] 32bit Raspbian の Kamailio 6.0 は `-X tlsf -x tlsf` が必須（`memmgr.conf`）。
 - [ ] 待ち受けの確認: `ss -lunp | grep 5060` で、Tailscale の IP と 127.0.0.1 の両方が出るか。
-- [ ] 登録状況: `sudo kamcmd ul.dump`。Address が **100.x（Tailscale）**になっているか（192.168.x なら nathelper の設定が未反映）。
+- [ ] 登録状況: `sudo kamcmd ul.dump | grep -E "AoR|Address|Received"`。相手の番号があるか。**Received** が 100.x（Tailscale）か（Address は 192.168.x でも nathelper で Received に送るので問題ない）。
+- [ ] Kamailio を再起動すると登録はすべて消える → 全員が再登録したか確認する。MicroSIP はトレイから「終了」→ 起動で再登録する。
+- [ ] 実際の通信を見る: `sudo tcpdump -ni any udp port 5060`（サーバー側）。grep で絞るときに `^` で行頭指定しない。
+- [ ] **sipserver = サーバー、sipphone = 端末**。プロンプトのホスト名を見てから実行する。
 - [ ] 通信の確認: `sudo sngrep port 5060`（**サーバー側で**実行する）。REGISTER が来ない → 送信元の Tailscale の問題。403 → Tailscale 以外の経路から来ている。
 - [ ] サーバーの欄には Tailscale の IP を入れる（LAN の IP では 403 になる）。
 
@@ -344,7 +367,9 @@
 - [x] キャプティブポータルの自動認証（Wi2 onetap）（Step 19〜20）
 - [x] SIPサーバーの稼働、PC ⇔ iPhone の通話（Step 24〜25）
 - [x] 端末の baresip、TFT の通話画面、ヘッドセットのボタン（Step 26〜27）
-- [ ] サーバーに nathelper 版の kamailio.cfg を反映する（1001 の Address が 100.x になることを確認する）
+- [x] サーバーに nathelper 版の kamailio.cfg を反映する（1001 の Received が 100.x。Step 28）
+- [ ] MicroSIP が Kamailio 再起動後に再登録しない原因を調べる（MicroSIP のログ）
+- [ ] 両方のPiの pi パスワードを変更する
 - [ ] 待ち時間を入れた新しい tft_coproc.ino を書き込み、最初の1回だけタッチがずれる問題が直ったか確認する
 - [ ] ドン・キホーテでの現地試験（端末 ⇔ モバイル回線の iPhone / 自宅の PC）
 - [ ] 再起動後に自動で復帰するか確認する（Wi-Fi → 認証 → Tailscale → baresip の順）

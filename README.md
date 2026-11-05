@@ -31,12 +31,14 @@
 | `wifi_ui.py` | 端末のメイン（TFT UI、Wi-Fi、ポータル認証、通話画面）。systemd の `wifi-ui.service` で動かす |
 | `phone.py` | baresip の操作（ctrl_tcp）、ヘッドセットのボタン、短縮ダイヤル / 履歴 |
 | `baresip_setup.sh`, `baresip.service` | baresip の設定と常駐化 |
-| `touch_check.py` | タッチパネル（抵抗膜）の健全性チェック |
+| `touch_check.py` | タッチパネル（抵抗膜）の健全性チェック（端末 Pi で実行） |
+| `touch_diag/touch_diag.ino` | タッチパネル単体の故障診断（UNO に書き込み、シリアルモニタ 115200bps。膜の断線・短絡・押下を判定） |
 | `pi_install.sh`, `deploy.ps1`, `deploy.bat` | Windows PC から端末 Pi へ転送・インストール |
 | `tft_coproc/tft_coproc.ino` | ATmega328P 用ファームウェア（描画とタッチ読み取り、行コマンド方式） |
 | `pc_tools/` | Windows PC 用のポータル解析・認証ツール（`captive_lib.py` は端末と共通） |
 | `server/` | SIPサーバー（Kamailio）の設定とインストールスクリプト、構築ガイド |
-| `docs/` | ハードウェアの配線、実現性検討、開発ログ（詰まった点とチェックリスト） |
+| `docs/` | ハードウェアの配線、回路図（`schematic.png` / `.svg`）、実現性検討、開発ログ（詰まった点とチェックリスト） |
+| `tools/` | `tft_render.py`（実機なしで TFT 画面を PNG 化）、`schematic.py`（回路図の生成） |
 
 ## 必要なもの
 - Raspberry Pi Zero W ×2（端末用とサーバー用。端末は Zero 2 W でも可）、microSD 16GB 以上
@@ -46,7 +48,7 @@
 - Tailscale アカウント（無料）
 
 ## セットアップの流れ
-1. **配線と 328P の書き込み**: [docs/hardware-setup.md](docs/hardware-setup.md)
+1. **配線と 328P の書き込み**: [docs/hardware-setup.md](docs/hardware-setup.md)、回路図 [docs/schematic.png](docs/schematic.png)
    - MiniCore / ATmega328 / External 16MHz で書き込む。
 2. **SIPサーバー**: [server/SERVER_GUIDE.md](server/SERVER_GUIDE.md)
    - Raspberry Pi OS Lite 32bit → Tailscale → `install_kamailio.sh`。
@@ -61,7 +63,9 @@
 
 ## 制限と注意
 - **認証なし**: SIP のパスワード認証（digest）はまだ実装していません。Tailscale の中（自分の機器だけ）で使う前提です。サーバーを公開ネットワークに出さないでください。
-- **iPhone**: iOS はバックグラウンドの SIP 通信を許さないため、アプリを前面に出している間だけ登録・着信できます。
+- **iPhone**: iOS はバックグラウンドの SIP 通信を許さないため、アプリを前面に出している間だけ登録・着信できます。無料版 AGEphone のプッシュ着信は対応サーバーが限られ、自前の Kamailio では使えません。
+- **サーバー再起動後の再登録**: Kamailio の登録情報はメモリのみです。再起動後に MicroSIP が再登録しない場合は、トレイから「終了」→ 起動します（`sudo kamcmd ul.dump` で確認）。
+- **タッチがほとんど反応しない**: 生値がずれて校正が合わなくなっていることがあります。`sudo python3 /opt/sipphone/wifi_ui.py --cal` で校正画面から起動してやり直します。
 - **ポータルの自動認証**: 対応しているのは Wi2 の onetap 方式だけです。利用規約への同意を自動化するものなので、各サービスの規約を確認したうえで、自己責任で使ってください。
 - **一度に1通話だけ**: 通話中の2本目の着信は無視します。着信音・呼出音は鳴らしません（画面表示のみ）。
 - **Kamailio 6.0 の起動オプション**: 32bit Raspbian では `-X tlsf -x tlsf` が必須です（`server/memmgr.conf`）。
